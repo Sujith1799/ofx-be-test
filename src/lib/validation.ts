@@ -1,6 +1,11 @@
+export enum Currency {
+    USD = 'USD',
+    AUD = 'AUD'
+}
+
 export interface PaymentInput {
     amount: number;
-    currency: string;
+    currency: Currency;
 }
 
 export interface ValidationResult {
@@ -8,11 +13,24 @@ export interface ValidationResult {
     errors: string[];
 }
 
+const isValidCurrency = (value: string): value is Currency => {
+    return Object.values(Currency).includes(value as Currency);
+};
+
 export const validatePaymentInput = (input: any): ValidationResult => {
     const errors: string[] = [];
 
     if (!input || typeof input !== 'object') {
         return { isValid: false, errors: ['Invalid input format'] };
+    }
+
+    // Check for unexpected fields first
+    const allowedFields = ['amount', 'currency'];
+    const providedFields = Object.keys(input);
+    const unexpectedFields = providedFields.filter(field => !allowedFields.includes(field));
+    
+    if (unexpectedFields.length > 0) {
+        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
     }
 
     // Validate amount
@@ -27,21 +45,12 @@ export const validatePaymentInput = (input: any): ValidationResult => {
     }
 
     // Validate currency
-    if (!input.currency) {
+    if (input.currency === undefined || input.currency === null) {
         errors.push('Currency is required');
     } else if (typeof input.currency !== 'string') {
         errors.push('Currency must be a string');
-    } else if (!/^[A-Z]{3}$/.test(input.currency)) {
-        errors.push('Currency must be a 3-letter uppercase code (e.g., USD, EUR, GBP)');
-    }
-
-    // Check for unexpected fields
-    const allowedFields = ['amount', 'currency'];
-    const providedFields = Object.keys(input);
-    const unexpectedFields = providedFields.filter(field => !allowedFields.includes(field));
-    
-    if (unexpectedFields.length > 0) {
-        errors.push(`Unexpected fields: ${unexpectedFields.join(', ')}`);
+    } else if (!isValidCurrency(input.currency)) {
+        errors.push('Currency must be a 3-letter uppercase code');
     }
 
     return {
