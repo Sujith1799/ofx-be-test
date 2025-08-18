@@ -30,6 +30,50 @@ describe('createPayment handler', () => {
         }));
     });
 
+    it('handles missing request body', async () => {
+        const event = {
+            body: null
+        } as APIGatewayProxyEvent;
+
+        const result = await handler(event);
+
+        expect(result.statusCode).toBe(422);
+        const responseBody = JSON.parse(result.body);
+        expect(responseBody.error).toBe('Validation failed');
+        expect(responseBody.details).toContain('Amount is required');
+        expect(responseBody.details).toContain('Currency is required');
+    });
+
+    it('handles invalid JSON in request body', async () => {
+        const event = {
+            body: 'invalid json'
+        } as APIGatewayProxyEvent;
+
+        const result = await handler(event);
+
+        expect(result.statusCode).toBe(422);
+        const responseBody = JSON.parse(result.body);
+        expect(responseBody.error).toBe('Validation failed');
+    });
+
+    it('returns 500 when createPayment throws an error', async () => {
+        const createPaymentMock = jest.spyOn(payments, 'createPayment').mockRejectedValueOnce(new Error('DB Error'));
+        const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+        
+        const event = {
+            body: JSON.stringify({ amount: 1000, currency: 'USD' })
+        } as APIGatewayProxyEvent;
+
+        const result = await handler(event);
+
+        expect(result.statusCode).toBe(500);
+        const responseBody = JSON.parse(result.body);
+        expect(responseBody.error).toBe('Internal server error');
+        expect(consoleSpy).toHaveBeenCalledWith('Error creating payment:', expect.any(Error));
+        
+        consoleSpy.mockRestore();
+    });
+
     it('returns 422 when amount is missing', async () => {
         const event = {
             body: JSON.stringify({ currency: 'USD' })
