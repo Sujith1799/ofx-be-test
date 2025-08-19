@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
-import { Cors, LambdaIntegration, RestApi } from 'aws-cdk-lib/aws-apigateway';
-import { AttributeType, Table } from 'aws-cdk-lib/aws-dynamodb';
-import { Runtime } from 'aws-cdk-lib/aws-lambda';
+import { Cors, LambdaIntegration, RestApi, RequestValidator, Model, JsonSchemaType, JsonSchemaVersion } from 'aws-cdk-lib/aws-apigateway';
+import { AttributeType, Table, BillingMode } from 'aws-cdk-lib/aws-dynamodb';
+import { Runtime, Tracing } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { Construct } from 'constructs';
 
@@ -13,37 +13,117 @@ export class BeTestStack extends cdk.Stack {
         const paymentsTable = new Table(this, 'PaymentsTable', {
             tableName: 'PaymentsTable',
             partitionKey: { name: 'paymentId', type: AttributeType.STRING },
+            billingMode: BillingMode.PAY_PER_REQUEST,
+            pointInTimeRecovery: true,
+            removalPolicy: cdk.RemovalPolicy.DESTROY, // For dev/test environments
         });
 
-        // API
+        // // Add a GSI for querying by currency more efficiently
+        // paymentsTable.addGlobalSecondaryIndex({
+        //     indexName: 'CurrencyIndex',
+        //     partitionKey: { name: 'currency', type: AttributeType.STRING },
+        //     sortKey: { name: 'createdAt', type: AttributeType.STRING },
+        // });
+
         const paymentsApi = new RestApi(this, 'ofxPaymentsChallenge', {
+            restApiName: 'OFX Payments API',
+            description: 'API for managing payments in the OFX system',
             defaultCorsPreflightOptions: {
                 allowOrigins: Cors.ALL_ORIGINS,
                 allowMethods: Cors.ALL_METHODS,
+                allowHeaders: ['Content-Type', 'X-Amz-Date', 'Authorization', 'X-Api-Key'],
             },
         });
+
+        // Request validation models
+        const paymentInputModel = new Model(this, 'PaymentInputModel', {
+            restApi: paymentsApi,
+            modelName: 'PaymentInput',
+            contentType: 'application/json',
+            schema: {
+                schema: JsonSchemaVersion.DRAFT4,
+                type: JsonSchemaType.OBJECT,
+                properties: {
+                    amount: {
+                        type: JsonSchemaType.NUMBER,
+                        minimum: 0.01,
+                        maximum: 1000000
+                    },
+                    currency: {
+                        type: JsonSchemaType.STRING,
+                        enum: ['USD', 'AUD', 'EUR', 'GBP', 'SGD']
+                    }
+                },
+                required: ['amount', 'currency'],
+                additionalProperties: false
+            }
+        });
+
+        const requestValidator = new RequestValidator(this, 'RequestValidator', {
+            restApi: paymentsApi,
+            requestValidatorName: 'PaymentRequestValidator',
+            validateRequestBody: true,
+            validateRequestParameters: true,
+        });
+
+        // API Resources
         const paymentsResource = paymentsApi.root.addResource('payments');
         const specificPaymentResource = paymentsResource.addResource('{id}');
 
-        // Functions
-        const createPaymentFunction = this.createLambda('createPayment', 'src/createPayment.ts');
+        const createPaymentFunction = this.createLambda('createPayment', 'src/createPayment.ts', paymentsTable.tableName);
         paymentsTable.grantWriteData(createPaymentFunction);
-        paymentsResource.addMethod('POST', new LambdaIntegration(createPaymentFunction));
+        paymentsResource.addMethod('POST', new LambdaIntegration(createPaymentFunction), {
+            requestValidator,
+            requestModels: {
+                'application/json': paymentInputModel
+            }
+        });
 
-        const getPaymentFunction = this.createLambda('getPayment', 'src/getPayment.ts');
+        const getPaymentFunction = this.createLambda('getPayment', 'src/getPayment.ts', paymentsTable.tableName);
         paymentsTable.grantReadData(getPaymentFunction);
-        specificPaymentResource.addMethod('GET', new LambdaIntegration(getPaymentFunction));
+        specificPaymentResource.addMethod('GET', new LambdaIntegration(getPaymentFunction), {
+            requestParameters: {
+                'method.request.path.id': true
+            }
+        });
 
-        const listPaymentsFunction = this.createLambda('listPayments', 'src/listPayments.ts');
+        const listPaymentsFunction = this.createLambda('listPayments', 'src/listPayments.ts', paymentsTable.tableName);
         paymentsTable.grantReadData(listPaymentsFunction);
-        paymentsResource.addMethod('GET', new LambdaIntegration(listPaymentsFunction));
+        paymentsResource.addMethod('GET', new LambdaIntegration(listPaymentsFunction), {
+            requestParameters: {
+                'method.request.querystring.currency': false
+            }
+        });
+
+        // Stack Outputs
+        new cdk.CfnOutput(this, 'ApiGatewayUrl', {
+            value: paymentsApi.url,
+            description: 'API Gateway endpoint URL for Payments API',
+        });
+
+        new cdk.CfnOutput(this, 'PaymentsTableName', {
+            value: paymentsTable.tableName,
+            description: 'DynamoDB table name for payments',
+        });
     }
 
-    createLambda = (name: string, path: string) => {
+    createLambda = (name: string, path: string, tableName: string) => {
         return new NodejsFunction(this, name, {
             functionName: name,
-            runtime: Runtime.NODEJS_16_X,
+            runtime: Runtime.NODEJS_18_X,
             entry: path,
+            timeout: cdk.Duration.seconds(30),
+            memorySize: 256,
+            tracing: Tracing.ACTIVE,
+            environment: {
+                PAYMENTS_TABLE_NAME: tableName,
+                NODE_ENV: 'production'
+            },
+            bundling: {
+                minify: true,
+                sourceMap: true,
+                target: 'es2020'
+            }
         });
     };
 }

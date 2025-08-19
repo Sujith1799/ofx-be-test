@@ -2,6 +2,7 @@ import * as payments from '../src/lib/payments';
 import { handler } from '../src/createPayment';
 import { APIGatewayProxyEvent } from 'aws-lambda';
 import { Currency } from '../src/lib/validation';
+import { ErrorMessages } from '../src/lib/errors';
 
 describe('createPayment handler', () => {
     afterEach(() => {
@@ -23,6 +24,7 @@ describe('createPayment handler', () => {
         expect(responseBody.payment.amount).toBe(1000);
         expect(responseBody.payment.currency).toBe(Currency.USD);
         expect(responseBody.payment.id).toBeDefined();
+        expect(responseBody.message).toBe('Payment created successfully');
         expect(createPaymentMock).toHaveBeenCalledWith(expect.objectContaining({
             id: expect.any(String),
             amount: 1000,
@@ -39,9 +41,9 @@ describe('createPayment handler', () => {
 
         expect(result.statusCode).toBe(422);
         const responseBody = JSON.parse(result.body);
-        expect(responseBody.error).toBe('Validation failed');
-        expect(responseBody.details).toContain('Amount is required');
-        expect(responseBody.details).toContain('Currency is required');
+        expect(responseBody.error).toBe(ErrorMessages.VALIDATION_FAILED);
+        expect(responseBody.details).toContain(ErrorMessages.AMOUNT_REQUIRED);
+        expect(responseBody.details).toContain(ErrorMessages.CURRENCY_REQUIRED);
     });
 
     it('handles invalid JSON in request body', async () => {
@@ -53,10 +55,11 @@ describe('createPayment handler', () => {
 
         expect(result.statusCode).toBe(422);
         const responseBody = JSON.parse(result.body);
-        expect(responseBody.error).toBe('Validation failed');
+        expect(responseBody.error).toBe(ErrorMessages.VALIDATION_FAILED);
+        expect(responseBody.details).toContain(ErrorMessages.INVALID_INPUT_FORMAT);
     });
 
-    it('returns 500 when createPayment throws an error', async () => {
+    it('returns 500 when createPayment throws a non-PaymentError', async () => {
         const createPaymentMock = jest.spyOn(payments, 'createPayment').mockRejectedValueOnce(new Error('DB Error'));
         const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
         
@@ -68,7 +71,7 @@ describe('createPayment handler', () => {
 
         expect(result.statusCode).toBe(500);
         const responseBody = JSON.parse(result.body);
-        expect(responseBody.error).toBe('Internal server error');
+        expect(responseBody.error).toBe(ErrorMessages.INTERNAL_SERVER_ERROR);
         expect(consoleSpy).toHaveBeenCalledWith('Error creating payment:', expect.any(Error));
         
         consoleSpy.mockRestore();
@@ -83,8 +86,8 @@ describe('createPayment handler', () => {
 
         expect(result.statusCode).toBe(422);
         const responseBody = JSON.parse(result.body);
-        expect(responseBody.error).toBe('Validation failed');
-        expect(responseBody.details).toContain('Amount is required');
+        expect(responseBody.error).toBe(ErrorMessages.VALIDATION_FAILED);
+        expect(responseBody.details).toContain(ErrorMessages.AMOUNT_REQUIRED);
     });
 
     it('returns 422 when currency is missing', async () => {
@@ -96,8 +99,8 @@ describe('createPayment handler', () => {
 
         expect(result.statusCode).toBe(422);
         const responseBody = JSON.parse(result.body);
-        expect(responseBody.error).toBe('Validation failed');
-        expect(responseBody.details).toContain('Currency is required');
+        expect(responseBody.error).toBe(ErrorMessages.VALIDATION_FAILED);
+        expect(responseBody.details).toContain(ErrorMessages.CURRENCY_REQUIRED);
     });
 
     it('returns 422 when amount is not a number', async () => {
@@ -109,7 +112,7 @@ describe('createPayment handler', () => {
 
         expect(result.statusCode).toBe(422);
         const responseBody = JSON.parse(result.body);
-        expect(responseBody.details).toContain('Amount must be a number');
+        expect(responseBody.details).toContain(ErrorMessages.AMOUNT_MUST_BE_NUMBER);
     });
 
     it('returns 422 when amount is zero or negative', async () => {
@@ -121,19 +124,33 @@ describe('createPayment handler', () => {
 
         expect(result.statusCode).toBe(422);
         const responseBody = JSON.parse(result.body);
-        expect(responseBody.details).toContain('Amount must be greater than 0');
+        expect(responseBody.details).toContain(ErrorMessages.AMOUNT_MUST_BE_POSITIVE);
     });
 
-    it('returns 422 when currency format is invalid', async () => {
+    it('returns 422 when amount is infinite (JSON converts to null)', async () => {
+        // When JSON.stringify encounters Infinity, it converts it to null
+        // So we test the actual behavior that occurs in the handler
         const event = {
-            body: JSON.stringify({ amount: 1000, currency: 'EUR' })
+            body: '{"amount":null,"currency":"USD"}'
         } as APIGatewayProxyEvent;
 
         const result = await handler(event);
 
         expect(result.statusCode).toBe(422);
         const responseBody = JSON.parse(result.body);
-        expect(responseBody.details).toContain('Currency must be a 3-letter uppercase code');
+        expect(responseBody.details).toContain(ErrorMessages.AMOUNT_REQUIRED);
+    });
+
+    it('returns 422 when currency format is invalid', async () => {
+        const event = {
+            body: JSON.stringify({ amount: 1000, currency: 'INVALID' })
+        } as APIGatewayProxyEvent;
+
+        const result = await handler(event);
+
+        expect(result.statusCode).toBe(422);
+        const responseBody = JSON.parse(result.body);
+        expect(responseBody.details).toContain(ErrorMessages.CURRENCY_INVALID);
     });
 
     it('returns 422 when unexpected fields are provided', async () => {
@@ -162,6 +179,42 @@ describe('createPayment handler', () => {
         expect(responseBody.payment.currency).toBe(Currency.AUD);
         expect(createPaymentMock).toHaveBeenCalledWith(expect.objectContaining({
             currency: Currency.AUD
+        }));
+    });
+
+    it('accepts all supported currencies', async () => {
+        const createPaymentMock = jest.spyOn(payments, 'createPayment').mockResolvedValue(undefined);
+        const currencies = ['USD', 'AUD', 'EUR', 'GBP', 'SGD'];
+        
+        for (const currency of currencies) {
+            const event = {
+                body: JSON.stringify({ amount: 1000, currency })
+            } as APIGatewayProxyEvent;
+
+            const result = await handler(event);
+
+            expect(result.statusCode).toBe(201);
+            const responseBody = JSON.parse(result.body);
+            expect(responseBody.payment.currency).toBe(currency);
+        }
+        
+        expect(createPaymentMock).toHaveBeenCalledTimes(currencies.length);
+    });
+
+    it('validates decimal amounts correctly', async () => {
+        const createPaymentMock = jest.spyOn(payments, 'createPayment').mockResolvedValueOnce(undefined);
+        
+        const event = {
+            body: JSON.stringify({ amount: 99.99, currency: 'USD' })
+        } as APIGatewayProxyEvent;
+
+        const result = await handler(event);
+
+        expect(result.statusCode).toBe(201);
+        const responseBody = JSON.parse(result.body);
+        expect(responseBody.payment.amount).toBe(99.99);
+        expect(createPaymentMock).toHaveBeenCalledWith(expect.objectContaining({
+            amount: 99.99
         }));
     });
 });

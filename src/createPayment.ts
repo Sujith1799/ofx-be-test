@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { buildResponse, parseInput } from './lib/apigateway';
 import { createPayment, Payment } from './lib/payments';
 import { validatePaymentInput, PaymentInput } from './lib/validation';
+import { ErrorMessages, ValidationError, PaymentError } from './lib/errors';
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
     try {
@@ -11,10 +12,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         // Validate the input
         const validation = validatePaymentInput(input);
         if (!validation.isValid) {
-            return buildResponse(422, { 
-                error: 'Validation failed',
-                details: validation.errors
-            });
+            throw new ValidationError(ErrorMessages.VALIDATION_FAILED, validation.errors);
         }
 
         const validatedInput = input as PaymentInput;
@@ -32,10 +30,19 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         
         return buildResponse(201, { 
             result: payment.id,
-            payment: payment
+            payment: payment,
+            message: 'Payment created successfully'
         });
     } catch (error) {
         console.error('Error creating payment:', error);
-        return buildResponse(500, { error: 'Internal server error' });
+        
+        if (error instanceof PaymentError) {
+            return buildResponse(error.statusCode, { 
+                error: error.message,
+                ...(error instanceof ValidationError && { details: error.errors })
+            });
+        }
+        
+        return buildResponse(500, { error: ErrorMessages.INTERNAL_SERVER_ERROR });
     }
 };
