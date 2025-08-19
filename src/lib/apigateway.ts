@@ -1,4 +1,5 @@
 import { APIGatewayProxyResult } from 'aws-lambda';
+import { ErrorMessages, ValidationError } from './errors';
 
 export const buildResponse = (statusCode: number, body: Object): APIGatewayProxyResult => {
     return {
@@ -16,6 +17,6 @@ export const parseInput = (body: string): Object => {
         return JSON.parse(body);
     } catch (err) {
         console.error(err);
-        return {};
+        throw new ValidationError(ErrorMessages.VALIDATION_FAILED, [ErrorMessages.INVALID_INPUT_FORMAT]);
     }
 };
