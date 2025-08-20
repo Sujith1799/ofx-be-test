@@ -5,6 +5,12 @@ import { createPayment, Payment } from './lib/payments';
 import { validatePaymentInput, PaymentInput } from './lib/validation';
 import { ErrorMessages, ValidationError, PaymentError } from './lib/errors';
 
+/**
+ * Handler function to create a new payment.
+ * 
+ * @param event APIGatewayProxyEvent - The event object containing the request data.
+ * @returns APIGatewayProxyResult - The response object containing the payment ID or error message.
+ */
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
     try {
         const input = parseInput(event.body || '{}');

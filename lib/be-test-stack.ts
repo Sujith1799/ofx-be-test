@@ -4,6 +4,7 @@ import { AttributeType, Table, BillingMode } from 'aws-cdk-lib/aws-dynamodb';
 import { Runtime, Tracing } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { Construct } from 'constructs';
+import { Currency } from '../src/lib/validation';
 
 export class BeTestStack extends cdk.Stack {
     constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -17,13 +18,6 @@ export class BeTestStack extends cdk.Stack {
             pointInTimeRecovery: true,
             removalPolicy: cdk.RemovalPolicy.DESTROY, // For dev/test environments
         });
-
-        // // Add a GSI for querying by currency more efficiently
-        // paymentsTable.addGlobalSecondaryIndex({
-        //     indexName: 'CurrencyIndex',
-        //     partitionKey: { name: 'currency', type: AttributeType.STRING },
-        //     sortKey: { name: 'createdAt', type: AttributeType.STRING },
-        // });
 
         const paymentsApi = new RestApi(this, 'ofxPaymentsChallenge', {
             restApiName: 'OFX Payments API',
@@ -51,7 +45,7 @@ export class BeTestStack extends cdk.Stack {
                     },
                     currency: {
                         type: JsonSchemaType.STRING,
-                        enum: ['USD', 'AUD', 'EUR', 'GBP', 'SGD']
+                        enum: [Currency.USD, Currency.AUD, Currency.EUR, Currency.GBP, Currency.SGD]
                     }
                 },
                 required: ['amount', 'currency'],

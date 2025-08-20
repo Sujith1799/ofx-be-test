@@ -8,6 +8,12 @@ const isValidCurrency = (value: string): value is Currency => {
     return Object.values(Currency).includes(value as Currency);
 };
 
+/**
+ * Handler function to list payments with optional currency filter.
+ * 
+ * @param event APIGatewayProxyEvent - The event object containing the request data.
+ * @returns APIGatewayProxyResult - The response object containing the payment data or error message.
+ */
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
     try {
         const currency = event.queryStringParameters?.currency;

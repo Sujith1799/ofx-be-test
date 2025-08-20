@@ -3,6 +3,12 @@ import { buildResponse } from './lib/apigateway';
 import { getPayment } from './lib/payments';
 import { ErrorMessages, BadRequestError, NotFoundError, PaymentError } from './lib/errors';
 
+/**
+ * Handler function to retrieve a payment by its ID.
+ * 
+ * @param event APIGatewayProxyEvent - The event object containing the request data.
+ * @returns APIGatewayProxyResult - The response object containing the payment data or error message.
+ */
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
     try {
         const paymentId = event.pathParameters?.id;
