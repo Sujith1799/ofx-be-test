@@ -14,17 +14,9 @@ export const getPayment = async (paymentId: string): Promise<Payment | null> => 
             })
         );
 
-        if (!result.Item) {
-            return null;
-        }
-
         // Transform DynamoDB item back to Payment format
-        return {
-            id: result.Item.paymentId,
-            amount: result.Item.amount,
-            currency: result.Item.currency,
-            createdAt: result.Item.createdAt
-        };
+        return result.Item ? mapItemToPayment(result.Item) : null;
+
     } catch (error) {
         console.error(`Failed to get payment ${paymentId}:`, error);
         throw new PaymentError(`Failed to retrieve payment: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -51,12 +43,7 @@ export const listPayments = async (currency?: string): Promise<Payment[]> => {
         const result = await DocumentClient.send(new ScanCommand(scanParams));
         
         // Transform DynamoDB items back to Payment format
-        const payments = (result.Items || []).map(item => ({
-            id: item.paymentId,
-            amount: item.amount,
-            currency: item.currency,
-            createdAt: item.createdAt
-        }));
+        const payments = (result.Items || []).map(mapItemToPayment);
 
         // Sort by creation date (newest first)
         return payments.sort((a, b) => {
@@ -104,3 +91,12 @@ export type Payment = {
     currency: Currency;
     createdAt?: string;
 };
+
+
+// could be in helper functions if repo gets bigger
+const mapItemToPayment = (item: Record<string, any>): Payment => ({
+    id: item.paymentId,
+    amount: item.amount,
+    currency: item.currency,
+    createdAt: item.createdAt,
+});
